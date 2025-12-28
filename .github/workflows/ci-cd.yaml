@@ -110,7 +110,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: WeMoova/argo-apps
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.ARGOCD_SYNC_TOKEN }}
           path: argo-apps
 
       - name: Update image tag in manifests
