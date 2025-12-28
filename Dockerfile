@@ -27,9 +27,6 @@ WORKDIR /root/
 # Copy binary from builder
 COPY --from=builder /app/main .
 
-# Copy migrations if they exist
-COPY --from=builder /app/migrations ./migrations 2>/dev/null || true
-
 # Create non-root user
 RUN addgroup -g 1000 appuser && \
     adduser -D -u 1000 -G appuser appuser && \
