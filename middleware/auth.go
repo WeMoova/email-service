@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 )
 
 type contextKey string
@@ -25,20 +25,8 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-type JWKS struct {
-	Keys []JWK `json:"keys"`
-}
-
-type JWK struct {
-	Kid string `json:"kid"`
-	Kty string `json:"kty"`
-	Use string `json:"use"`
-	N   string `json:"n"`
-	E   string `json:"e"`
-}
-
 var (
-	jwksCache     *JWKS
+	jwksCache     jwk.Set
 	jwksCacheMux  sync.RWMutex
 	jwksCacheTime time.Time
 	cacheDuration = 24 * time.Hour
@@ -110,22 +98,26 @@ func validateToken(tokenString string) (*JWTClaims, error) {
 	return nil, fmt.Errorf("invalid token claims")
 }
 
-func fetchPublicKey(jwksURL, kid string) (*rsa.PublicKey, error) {
-	jwks, err := getJWKS(jwksURL)
+func fetchPublicKey(jwksURL, kid string) (interface{}, error) {
+	set, err := getJWKS(jwksURL)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, key := range jwks.Keys {
-		if key.Kid == kid {
-			return parseRSAPublicKey(key)
-		}
+	key, found := set.LookupKeyID(kid)
+	if !found {
+		return nil, fmt.Errorf("key with kid %s not found", kid)
 	}
 
-	return nil, fmt.Errorf("key with kid %s not found", kid)
+	var rawKey interface{}
+	if err := key.Raw(&rawKey); err != nil {
+		return nil, fmt.Errorf("failed to get raw key: %w", err)
+	}
+
+	return rawKey, nil
 }
 
-func getJWKS(jwksURL string) (*JWKS, error) {
+func getJWKS(jwksURL string) (jwk.Set, error) {
 	// Check cache
 	jwksCacheMux.RLock()
 	if jwksCache != nil && time.Since(jwksCacheTime) < cacheDuration {
@@ -135,57 +127,18 @@ func getJWKS(jwksURL string) (*JWKS, error) {
 	jwksCacheMux.RUnlock()
 
 	// Fetch JWKS
-	resp, err := http.Get(jwksURL)
+	set, err := jwk.Fetch(context.Background(), jwksURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("JWKS endpoint returned status %d", resp.StatusCode)
-	}
-
-	var jwks JWKS
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
-		return nil, fmt.Errorf("failed to decode JWKS: %w", err)
 	}
 
 	// Update cache
 	jwksCacheMux.Lock()
-	jwksCache = &jwks
+	jwksCache = set
 	jwksCacheTime = time.Now()
 	jwksCacheMux.Unlock()
 
-	return &jwks, nil
-}
-
-func parseRSAPublicKey(key JWK) (*rsa.PublicKey, error) {
-	// Decode base64url encoded N and E
-	nBytes, err := jwt.DecodeSegment(key.N)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode N: %w", err)
-	}
-
-	eBytes, err := jwt.DecodeSegment(key.E)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode E: %w", err)
-	}
-
-	// Convert bytes to big.Int
-	var n, e int
-	for _, b := range nBytes {
-		n = n<<8 | int(b)
-	}
-	for _, b := range eBytes {
-		e = e<<8 | int(b)
-	}
-
-	// Note: This is a simplified version. In production, use a proper library
-	// like github.com/lestrrat-go/jwx for full JWK support
-	return &rsa.PublicKey{
-		N: nil, // Would need proper conversion here
-		E: e,
-	}, fmt.Errorf("use github.com/lestrrat-go/jwx for proper JWK parsing")
+	return set, nil
 }
 
 func respondError(w http.ResponseWriter, message string, statusCode int) {
