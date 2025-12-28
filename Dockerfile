@@ -6,13 +6,13 @@ WORKDIR /app
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates
 
-# Copy go mod files
-COPY go.mod ./
-RUN go mod download
-RUN go mod verify
-
-# Copy source code
+# Copy source code first (includes go.mod)
 COPY . .
+
+# Download dependencies and generate go.sum
+RUN go mod download
+RUN go mod tidy
+RUN go mod verify
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -ldflags="-w -s" -o main .
