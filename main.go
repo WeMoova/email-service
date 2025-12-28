@@ -60,16 +60,19 @@ func main() {
 		})
 	})
 
-	// Health endpoints (no auth required)
-	r.Get("/health", handlers.HealthCheck)
-	r.Get("/ready", handlers.ReadinessCheck(database))
+	// Mount all routes under /email-service prefix for ALB path-based routing
+	r.Route("/email-service", func(r chi.Router) {
+		// Health endpoints (no auth required)
+		r.Get("/health", handlers.HealthCheck)
+		r.Get("/ready", handlers.ReadinessCheck(database))
 
-	// Protected routes
-	r.Group(func(r chi.Router) {
-		r.Use(authMiddleware.JWTAuth)
+		// Protected routes
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.JWTAuth)
 
-		// Add your protected routes here
-		r.Get("/api/v1/example", handlers.ExampleHandler)
+			// Add your protected routes here
+			r.Get("/api/v1/example", handlers.ExampleHandler)
+		})
 	})
 
 	// Server configuration
